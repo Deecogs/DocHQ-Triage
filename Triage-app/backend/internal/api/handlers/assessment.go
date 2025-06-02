@@ -200,7 +200,7 @@ func SendQuestionsToAIHandler(c *gin.Context) {
 	}
 
 	// Call the AI service
-	aiResponse, err := services.SendQuestionsToAI(assessmentIDUint, questionRequest.QuestionHistory)
+	aiResponse, err := services.SendQuestionsToAI(assessmentIDUint, questionRequest)
 	if err != nil {
 		log.Println(`Error sending questions to AI `, assessmentID)
 		helpers.SendResponse(c.Writer, false, http.StatusInternalServerError, "",err)

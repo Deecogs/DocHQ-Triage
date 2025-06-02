@@ -94,6 +94,7 @@ func UpdateAssessmentStatus(assessmentID uint32, status string, completionPercen
 
 type QuestionRequest struct {
 	QuestionHistory []QuestionMessage `json:"chat_history"`
+	Video           string            `json:"video,omitempty"` // Add video field for body part identification
 }
 
 type QuestionMessage struct {
@@ -313,13 +314,13 @@ func SendChatToAI(assessmentIDUint uint32, chatMessage []ChatMessage) (APIRespon
 }
 
 // SendQuestionsToAI sends chat history to the AI model and retrieves a response
-func SendQuestionsToAI(assessmentIDUint uint32, questionMessage []QuestionMessage) (APIResponse, error) {
+func SendQuestionsToAI(assessmentIDUint uint32, questionRequest QuestionRequest) (APIResponse, error) {
 	var aiResponse APIResponse
 
 	url := "https://deecogs-xai-bot-844145949029.europe-west1.run.app/chat"
 
-	// Prepare the request payload
-	payload := QuestionRequest{QuestionHistory: questionMessage}
+	// Prepare the request payload (now includes video if present)
+	payload := questionRequest
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return aiResponse, err
