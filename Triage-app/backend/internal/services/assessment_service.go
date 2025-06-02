@@ -46,24 +46,6 @@ type ChatResponse struct {
 	Response string `json:"response"`
 }
 
-// CreateAssessment creates a new assessment (stub implementation)
-func CreateAssessment(userID, anatomyID uint32, assessmentType string) (*Assessment, error) {
-	// For now, return a mock assessment
-	// In production, this would save to database
-	assessment := &Assessment{
-		AssessmentID:         uint32(time.Now().Unix()), // Use timestamp as ID for uniqueness
-		UserID:               userID,
-		AnatomyID:            anatomyID,
-		AssessmentType:       assessmentType,
-		StartTime:            time.Now(),
-		Status:               "started",
-		CompletionPercentage: 0,
-		ChatHistory:          []ChatMessage{},
-	}
-	
-	log.Printf("Created assessment: %+v", assessment)
-	return assessment, nil
-}
 
 // GetAssessmentByID retrieves an assessment by ID (stub implementation)
 func GetAssessmentByID(assessmentID uint32) (*Assessment, error) {
@@ -83,14 +65,6 @@ func GetAssessmentByID(assessmentID uint32) (*Assessment, error) {
 	return assessment, nil
 }
 
-// UpdateAssessmentStatus updates the status of an assessment (stub implementation)
-func UpdateAssessmentStatus(assessmentID uint32, status string, completionPercentage float64) error {
-	// For now, just log the update
-	// In production, this would update the database
-	log.Printf("Updated assessment %d: status=%s, completion=%.2f%%", 
-		assessmentID, status, completionPercentage)
-	return nil
-}
 
 type QuestionRequest struct {
 	QuestionHistory []QuestionMessage `json:"chat_history"`
@@ -229,24 +203,29 @@ func GetAssessment(assessmentID uint32) (*Assessment, error) {
 
 	var chatHistory []ChatMessage
 	if ChatHistory == nil {
-		log.Println("Inner chat_history key missing")
+		log.Println("No chat history found for this assessment")
+		chatHistory = []ChatMessage{} // Initialize empty array
 	} else {
-		// Step 1: Convert Raw JSON to Map
-		var outerChatHistory map[string]json.RawMessage
-		if err := json.Unmarshal(ChatHistory, &outerChatHistory); err != nil {
-			log.Println("Failed to parse outer chat history JSON:", err)
-			return nil, err
-		}
-
-		// Step 2: Extract Inner `chat_history` JSON
-		if rawInner, exists := outerChatHistory["chat_history"]; exists {
-			if err := json.Unmarshal(rawInner, &chatHistory); err != nil {
-				log.Println("Failed to parse inner chat history JSON:", err)
+		// Try to unmarshal directly first (new format)
+		if err := json.Unmarshal(ChatHistory, &chatHistory); err != nil {
+			log.Println("Direct unmarshal failed, trying nested format...")
+			// If that fails, try the nested approach (legacy format)
+			var outerChatHistory map[string]json.RawMessage
+			if err := json.Unmarshal(ChatHistory, &outerChatHistory); err != nil {
+				log.Println("Failed to parse outer chat history JSON:", err)
 				return nil, err
 			}
-		} else {
-			log.Println("Inner chat_history key missing")
-			return nil, errors.New("chat_history format incorrect")
+
+			// Step 2: Extract Inner `chat_history` JSON
+			if rawInner, exists := outerChatHistory["chat_history"]; exists {
+				if err := json.Unmarshal(rawInner, &chatHistory); err != nil {
+					log.Println("Failed to parse inner chat history JSON:", err)
+					return nil, err
+				}
+			} else {
+				log.Println("Could not parse chat_history in any known format, using empty array")
+				chatHistory = []ChatMessage{} // Initialize empty array instead of error
+			}
 		}
 	}
 
@@ -427,23 +406,27 @@ func FetchAssessmentData(assessmentID uint32) (*DashboardDataAIRequest, error) {
 		return nil, err
 	}
 
-	// Step 1: Convert Raw JSON to Map
-	var outerChatHistory map[string]json.RawMessage
-	if err := json.Unmarshal(chatHistoryRaw, &outerChatHistory); err != nil {
-		log.Println("Failed to parse outer chat history JSON:", err)
-		return nil, err
-	}
-
-	// Step 2: Extract Inner `chat_history` JSON
+	// Try to unmarshal chat history directly first
 	var chatHistory []QuestionMessage
-	if rawInner, exists := outerChatHistory["chat_history"]; exists {
-		if err := json.Unmarshal(rawInner, &chatHistory); err != nil {
-			log.Println("Failed to parse inner chat history JSON:", err)
+	if err := json.Unmarshal(chatHistoryRaw, &chatHistory); err != nil {
+		log.Println("Direct unmarshal failed, trying nested format...")
+		// If that fails, try the nested approach (legacy format)
+		var outerChatHistory map[string]json.RawMessage
+		if err := json.Unmarshal(chatHistoryRaw, &outerChatHistory); err != nil {
+			log.Println("Failed to parse outer chat history JSON:", err)
 			return nil, err
 		}
-	} else {
-		log.Println("Inner chat_history key missing")
-		return nil, errors.New("chat_history format incorrect")
+
+		// Step 2: Extract Inner `chat_history` JSON
+		if rawInner, exists := outerChatHistory["chat_history"]; exists {
+			if err := json.Unmarshal(rawInner, &chatHistory); err != nil {
+				log.Println("Failed to parse inner chat history JSON:", err)
+				return nil, err
+			}
+		} else {
+			log.Println("Could not parse chat_history in any known format, using empty array")
+			chatHistory = []QuestionMessage{} // Initialize empty array instead of error
+		}
 	}
 
 	// Step 1: Convert Raw JSON to Map

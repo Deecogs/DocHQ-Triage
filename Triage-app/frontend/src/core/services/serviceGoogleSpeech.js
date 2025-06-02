@@ -7,7 +7,7 @@ class ServiceGoogleSpeech {
         this.GOOGLE_TTS_API = process.env.REACT_APP_GOOGLE_TTS_API || 'http://localhost:8080/api/text-to-speech';
         
         // Google Cloud API key (for direct API calls if needed)
-        this.GOOGLE_API_KEY = process.env.REACT_APP_GOOGLE_API_KEY || 'AIzaSyCTcL8Zkq9bL7ZnMHqlHzK__NE0eNZIz_0';
+        this.GOOGLE_API_KEY = process.env.REACT_APP_GOOGLE_API_KEY;
     }
 
     /**
@@ -24,9 +24,17 @@ class ServiceGoogleSpeech {
             // Remove the data URL prefix to get pure base64
             const audioContent = base64Audio.split(',')[1];
             
+            // Determine encoding based on audio type
+            let encoding = 'OGG_OPUS';
+            if (audioBlob.type.includes('webm')) {
+                encoding = 'WEBM_OPUS';
+            } else if (audioBlob.type.includes('mp4')) {
+                encoding = 'MP4';
+            }
+            
             const requestBody = {
                 config: {
-                    encoding: 'WEBM_OPUS', // Change based on your audio format
+                    encoding: encoding,
                     sampleRateHertz: 48000,
                     languageCode: languageCode,
                     enableAutomaticPunctuation: true,
@@ -57,7 +65,7 @@ class ServiceGoogleSpeech {
     }
 
     /**
-     * Convert text to speech using Google Text-to-Speech API
+     * Convert text to speech using Google Text-to-Speech API with Chirp models
      * @param {string} text - Text to convert to speech
      * @param {Object} options - Voice options
      * @returns {Promise<Blob>} - Audio blob
@@ -66,15 +74,15 @@ class ServiceGoogleSpeech {
         try {
             const requestBody = {
                 input: {
-                    text: text
+                    markup: text // Using markup field for Chirp models
                 },
                 voice: {
-                    languageCode: options.languageCode || 'en-US',
-                    name: options.voiceName || 'en-US-Neural2-F', // Female neural voice
-                    ssmlGender: options.ssmlGender || 'FEMALE'
+                    languageCode: options.languageCode || 'en-GB',
+                    name: options.voiceName || 'en-GB-Chirp3-HD-Despina', // High-quality Chirp voice
+                    voiceClone: {} // Enable voice cloning features
                 },
                 audioConfig: {
-                    audioEncoding: 'MP3',
+                    audioEncoding: options.audioEncoding || 'LINEAR16', // Better quality than MP3
                     speakingRate: options.speakingRate || 0.9,
                     pitch: options.pitch || 0,
                     volumeGainDb: options.volumeGainDb || 0
@@ -91,8 +99,8 @@ class ServiceGoogleSpeech {
             });
 
             if (response.data && response.data.audioContent) {
-                // Convert base64 to blob
-                const audioBlob = this.base64ToBlob(response.data.audioContent, 'audio/mp3');
+                // Convert base64 to blob - LINEAR16 is WAV format
+                const audioBlob = this.base64ToBlob(response.data.audioContent, 'audio/wav');
                 return audioBlob;
             }
             

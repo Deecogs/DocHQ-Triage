@@ -120,6 +120,8 @@ pgdata/
 # Google Cloud
 gcloud-key.json
 .gcloud/
+*-staging-*.json
+dochq-staging-*.json
 
 # Certificates
 *.crt

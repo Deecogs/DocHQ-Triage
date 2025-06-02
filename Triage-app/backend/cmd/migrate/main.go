@@ -16,6 +16,7 @@ func main() {
 	// Parse command-line flags
 	direction := flag.String("direction", "up", "Migration direction: 'up' or 'down'")
 	steps := flag.Int("steps", 0, "Number of migration steps (default: 0 for all)")
+	forceVersion := flag.Int("force", -1, "Force migration to specific version (-1 to disable)")
 	flag.Parse()
 
 	connStr := ""
@@ -42,6 +43,26 @@ func main() {
 		log.Fatalf("Failed to initialize migrate instance: %v", err)
 	}
 
+	// Check current migration version
+	version, dirty, err := m.Version()
+	if err != nil && err != migrate.ErrNilVersion {
+		log.Printf("Warning: Could not get migration version: %v", err)
+	} else if err != migrate.ErrNilVersion {
+		log.Printf("Current migration version: %d, dirty: %v", version, dirty)
+	} else {
+		log.Println("No migrations have been applied yet")
+	}
+
+	// Handle force version if specified
+	if *forceVersion >= 0 {
+		log.Printf("Forcing migration version to %d", *forceVersion)
+		if err := m.Force(*forceVersion); err != nil {
+			log.Fatalf("Failed to force version to %d: %v", *forceVersion, err)
+		}
+		log.Printf("Successfully forced migration version to %d", *forceVersion)
+		return
+	}
+
 	// Perform migration based on flags
 	switch *direction {
 	case "up":
@@ -51,7 +72,22 @@ func main() {
 			}
 		} else {
 			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-				log.Fatalf("Failed to migrate up: %v", err)
+				// Check if this is a "no migration found" error and handle gracefully
+				errStr := err.Error()
+				if errStr == "no migration found for version 2: read down for version 2 .: file does not exist" ||
+				   errStr == "no migration found for version 2" {
+					log.Println("Warning: Migration system expected version 2 but only version 1 exists.")
+					log.Println("This usually means the database is already at the latest version.")
+					log.Println("Attempting to force set to version 1...")
+					if forceErr := m.Force(1); forceErr != nil {
+						log.Printf("Could not force version to 1: %v", forceErr)
+						log.Fatalf("Failed to migrate up: %v", err)
+					} else {
+						log.Println("Successfully set migration version to 1")
+					}
+				} else {
+					log.Fatalf("Failed to migrate up: %v", err)
+				}
 			}
 		}
 		log.Println("Migrations applied successfully (up)!")

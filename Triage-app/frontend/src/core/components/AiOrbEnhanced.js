@@ -165,12 +165,21 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
             targetColor = mix(uColorIdle, uColorListening, uColorMix * 2.0);
         }
         
-        // Add glow effect
+        // Enhanced glow effect with listening boost
         float glow = sin(uTime * 2.0) * 0.2 + 0.8;
+        if (uColorMix > 0.0 && uColorMix < 0.6) { // Listening state
+            glow += sin(uTime * 6.0) * 0.4; // Faster pulsing when listening
+        }
         vec3 color = vPattern * targetColor * (1.0 + uGlowIntensity * glow);
         
-        // Add audio reactive brightness
-        color += vAudioIntensity * 0.3;
+        // Enhanced audio reactive brightness
+        color += vAudioIntensity * 0.5;
+        
+        // Extra shimmer effect when listening
+        if (uColorMix > 0.0 && uColorMix < 0.6) {
+            float shimmer = sin(uTime * 8.0 + vPattern * 10.0) * 0.3;
+            color += shimmer * targetColor * 0.4;
+        }
 
         csm_DiffuseColor = vec4(color, 1.);
         
@@ -179,13 +188,13 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
     }
     `;
 
-    // Smooth transitions for state changes
+    // Smooth transitions for state changes with enhanced listening feedback
     useEffect(() => {
-        const targetIntensity = isListening ? 0.6 : (isAiSpeaking ? 1.0 : 0.0);
+        const targetIntensity = isListening ? 1.2 : (isAiSpeaking ? 1.0 : 0.0); // Increased for listening
         const interval = setInterval(() => {
             setPulseIntensity(prev => {
                 const diff = targetIntensity - prev;
-                return Math.abs(diff) < 0.01 ? targetIntensity : prev + diff * 0.1;
+                return Math.abs(diff) < 0.01 ? targetIntensity : prev + diff * 0.15; // Faster transition
             });
         }, 16);
         
@@ -208,13 +217,30 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
     useFrame(({ clock }) => {
         const elapsedTime = clock.getElapsedTime();
         
-        // Rotate orb slowly
+        // Store clock reference for use in JSX
+        window.orbClock = clock;
+        
+        // Enhanced rotation and movement
         if (meshRef.current) {
-            meshRef.current.rotation.y = elapsedTime * 0.1;
+            // Faster rotation when listening
+            const rotationSpeed = isListening ? 0.3 : (isAiSpeaking ? 0.2 : 0.1);
+            meshRef.current.rotation.y = elapsedTime * rotationSpeed;
             
-            // Add bobbing motion when active
-            if (isListening || isAiSpeaking) {
+            // More pronounced bobbing when listening
+            if (isListening) {
+                meshRef.current.position.y = Math.sin(elapsedTime * 3) * 0.08;
+                // Add subtle rotation wobble for listening feedback
+                meshRef.current.rotation.x = Math.sin(elapsedTime * 4) * 0.05;
+                meshRef.current.rotation.z = Math.cos(elapsedTime * 3.5) * 0.03;
+            } else if (isAiSpeaking) {
                 meshRef.current.position.y = Math.sin(elapsedTime * 2) * 0.05;
+                meshRef.current.rotation.x = 0;
+                meshRef.current.rotation.z = 0;
+            } else {
+                // Return to center when idle
+                meshRef.current.position.y *= 0.95;
+                meshRef.current.rotation.x *= 0.95;
+                meshRef.current.rotation.z *= 0.95;
             }
         }
 
@@ -269,7 +295,7 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
             materialRef.current.uniforms.uPulseIntensity.value = pulseIntensity;
             materialRef.current.uniforms.uColorMix.value = colorTransition;
             materialRef.current.uniforms.uGlowIntensity.value = 
-                isAiSpeaking ? 1.5 : (isListening ? 1.0 : 0.3);
+                isAiSpeaking ? 1.5 : (isListening ? 1.8 : 0.3); // Higher glow for listening
         }
         if (depthMaterialRef.current) {
             depthMaterialRef.current.uniforms.uTime.value = elapsedTime;
@@ -286,8 +312,8 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
     const uniforms = {
         uTime: { value: 0 },
         uColorIdle: { value: new Color('#ffeffe') },
-        uColorListening: { value: new Color('#9333ea') }, // Purple for listening
-        uColorSpeaking: { value: new Color('#007aff') }, // Blue for AI speaking
+        uColorListening: { value: new Color('#ff69b4') }, // Hot pink for listening - more vibrant
+        uColorSpeaking: { value: new Color('#00bfff') }, // Deeper sky blue for AI speaking
         uColorMix: { value: 0 },
         uGlowIntensity: { value: 0.3 },
         uGradientStrength: { value: 3 },
@@ -306,7 +332,7 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
                 geometry={geometry} 
                 frustumCulled={false} 
                 position={[0, isMobile ? -1.3 * 0 : 0, 0]}
-                scale={isListening || isAiSpeaking ? 1.1 : 1}
+                scale={isListening ? 1.15 : (isAiSpeaking ? 1.1 : 1)} // Slightly larger when listening
             >
                 <CustomShaderMaterial 
                     ref={materialRef} 
@@ -335,23 +361,32 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
                 />
             </mesh>
             
-            {/* Dynamic lighting based on state */}
+            {/* Enhanced dynamic lighting */}
             <ambientLight 
-                color={isAiSpeaking ? "#007aff" : (isListening ? "#9333ea" : "#0079ff")} 
-                intensity={isListening || isAiSpeaking ? 5 : 4} 
+                color={isAiSpeaking ? "#00bfff" : (isListening ? "#ff69b4" : "#0079ff")} 
+                intensity={isListening ? 6 : (isAiSpeaking ? 5 : 4)} 
             />
             <directionalLight 
-                color={isAiSpeaking ? "#00c4ff" : (isListening ? "#ec4899" : "#c4fff8")} 
-                intensity={isListening || isAiSpeaking ? 6 : 5} 
+                color={isAiSpeaking ? "#87ceeb" : (isListening ? "#ff1493" : "#c4fff8")} 
+                intensity={isListening ? 7 : (isAiSpeaking ? 6 : 5)} 
                 position={[-0.33, 2, 3.50]} 
             />
             
-            {/* Add point light for extra glow when active */}
+            {/* Enhanced point light for extra glow when active */}
             {(isListening || isAiSpeaking) && (
                 <pointLight 
-                    color={isAiSpeaking ? "#007aff" : "#9333ea"} 
-                    intensity={2} 
+                    color={isAiSpeaking ? "#00bfff" : "#ff69b4"} 
+                    intensity={isListening ? 3 : 2} 
                     position={[0, 0, 2]} 
+                />
+            )}
+            
+            {/* Extra pulsing light when listening for maximum visibility */}
+            {isListening && (
+                <pointLight 
+                    color="#ff1493" 
+                    intensity={2 + Math.sin((window.orbClock?.getElapsedTime() || 0) * 5) * 0.5} 
+                    position={[0, 0, -2]} 
                 />
             )}
         </>
@@ -365,16 +400,21 @@ const AiOrbEnhanced = ({ analyser, isListening, isAiSpeaking, className = '' }) 
     return (
         <div className={`relative ${className}`}>
             <div className="w-[200px] h-[200px] bg-transparent relative">
-                {/* Glow effect background */}
+                {/* Enhanced glow effect background */}
                 <div 
                     className={`absolute inset-0 rounded-full transition-all duration-300 ${
                         isAiSpeaking 
-                            ? 'bg-blue-500/20 animate-pulse shadow-[0_0_60px_rgba(0,122,255,0.6)]' 
+                            ? 'bg-cyan-400/25 animate-pulse shadow-[0_0_80px_rgba(0,191,255,0.8)]' 
                             : isListening 
-                                ? 'bg-purple-500/20 animate-pulse shadow-[0_0_60px_rgba(147,51,234,0.6)]'
+                                ? 'bg-pink-400/30 animate-pulse shadow-[0_0_100px_rgba(255,105,180,0.9)]'
                                 : 'bg-white/5'
                     }`}
                 />
+                
+                {/* Additional inner glow for listening state */}
+                {isListening && (
+                    <div className="absolute inset-4 rounded-full bg-pink-300/20 animate-ping" />
+                )}
                 
                 {/* Canvas */}
                 <Canvas 
@@ -394,17 +434,34 @@ const AiOrbEnhanced = ({ analyser, isListening, isAiSpeaking, className = '' }) 
                 </Canvas>
             </div>
             
-            {/* Status text */}
-            <div className="absolute -bottom-8 left-0 right-0 text-center">
-                <p className={`text-sm font-medium transition-all duration-300 ${
+            {/* Enhanced status text with visual indicator */}
+            <div className="absolute -bottom-10 left-0 right-0 text-center">
+                <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full transition-all duration-300 ${
                     isAiSpeaking 
-                        ? 'text-blue-500' 
+                        ? 'bg-cyan-500/20 border border-cyan-400/30' 
                         : isListening 
-                            ? 'text-purple-500'
-                            : 'text-gray-400'
+                            ? 'bg-pink-500/20 border border-pink-400/30'
+                            : 'bg-gray-500/10 border border-gray-400/20'
                 }`}>
-                    {isAiSpeaking ? 'AI Speaking' : isListening ? 'Listening...' : 'Ready'}
-                </p>
+                    {/* Animated status dot */}
+                    <div className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                        isAiSpeaking 
+                            ? 'bg-cyan-400 animate-pulse' 
+                            : isListening 
+                                ? 'bg-pink-400 animate-bounce'
+                                : 'bg-gray-400'
+                    }`} />
+                    
+                    <p className={`text-xs font-medium transition-all duration-300 ${
+                        isAiSpeaking 
+                            ? 'text-cyan-300' 
+                            : isListening 
+                                ? 'text-pink-300'
+                                : 'text-gray-400'
+                    }`}>
+                        {isAiSpeaking ? 'AI Speaking' : isListening ? 'Listening...' : 'Ready'}
+                    </p>
+                </div>
             </div>
         </div>
     );

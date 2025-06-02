@@ -366,7 +366,7 @@ export default function App() {
                     setAssessmentId(newAssessmentId);
                     assessmentIdRef.current = newAssessmentId;
                     safeSetState(setIsStart, true);
-                    sendChat('Hi, Please wait while we are getting ready', newAssessmentId);
+                    sendChat('Hello', newAssessmentId);
                 } else {
                     throw new Error('Failed to create assessment');
                 }

@@ -39,9 +39,22 @@ export default function App() {
     const initMediaRecorder = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const recorder = new MediaRecorder(stream, {
-                mimeType: 'audio/webm;codecs=opus'
-            });
+            
+            // Check supported audio formats and choose the best one
+            let mimeType = 'audio/ogg;codecs=opus';
+            let audioType = 'audio/ogg';
+            
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                    mimeType = 'audio/webm;codecs=opus';
+                    audioType = 'audio/webm';
+                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                    mimeType = 'audio/mp4';
+                    audioType = 'audio/mp4';
+                }
+            }
+            
+            const recorder = new MediaRecorder(stream, { mimeType });
 
             recorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
@@ -50,7 +63,7 @@ export default function App() {
             };
 
             recorder.onstop = async () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const audioBlob = new Blob(audioChunks, { type: audioType });
                 await handleSpeechToText(audioBlob);
                 setAudioChunks([]); // Clear chunks
             };
@@ -297,7 +310,7 @@ export default function App() {
                 const newAssessmentId = res['data']['assessmentId'];
                 setAssessmentId(newAssessmentId);
                 setIsStart(true);
-                sendChat('Hi, Please wait while we are getting ready', newAssessmentId);
+                sendChat('Hello', newAssessmentId);
             }
         });
     };

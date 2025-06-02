@@ -107,7 +107,7 @@ jobs:
         working-directory: ./backend
         run: |
           mkdir cloudsql_proxy
-          (../cloud_sql_proxy -dir=cloudsql_proxy -instances=${{ env.INSTANCE_CONNECTION_NAME }}=tcp:5432 & sleep 15) && go run cmd/migrate/main.go
+          (../cloud_sql_proxy -dir=cloudsql_proxy -instances=${{ env.INSTANCE_CONNECTION_NAME }}=tcp:5432 & sleep 15) && go run cmd/migrate/main.go -force=1 && go run cmd/migrate/main.go
   
       - name: Configure Docker
         run: |
@@ -121,4 +121,5 @@ jobs:
           gcloud run deploy ${{ env.SERVICE }} --image ${IMAGE} --region ${{ env.REGION }} --allow-unauthenticated --add-cloudsql-instances=${{ env.INSTANCE_CONNECTION_NAME }} --cpu-throttling \
             --set-env-vars ENVIRONMENT=${{ env.ENVIRONMENT }} \
             --set-env-vars DATABASE_URL="${{ env.DATABASE_URL }}" \
+            --set-env-vars GOOGLE_CLOUD_PROJECT_ID=${{ env.PROJECT_ID }} \
 

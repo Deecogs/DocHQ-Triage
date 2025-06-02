@@ -7,7 +7,7 @@ import './assets/styles/app.css';
 import 'react-loading-skeleton/dist/skeleton.css';
 import 'react-toastify/dist/ReactToastify.css';
 
-import App from './app';
+import App from './app-google-speech';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

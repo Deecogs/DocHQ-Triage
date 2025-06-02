@@ -22,21 +22,23 @@ type SpeechToTextRequest struct {
 	} `json:"audio"`
 }
 
-// TextToSpeechRequest represents the request body for text-to-speech conversion
+// TextToSpeechRequest represents the request body for text-to-speech conversion with Chirp models
 type TextToSpeechRequest struct {
 	Input struct {
-		Text string `json:"text"`
+		Markup string `json:"markup,omitempty"`
+		Text   string `json:"text,omitempty"`
 	} `json:"input"`
 	Voice struct {
 		LanguageCode string `json:"languageCode"`
 		Name         string `json:"name"`
-		SsmlGender   string `json:"ssmlGender"`
+		SsmlGender   string `json:"ssmlGender,omitempty"`
+		VoiceClone   struct{} `json:"voiceClone,omitempty"`
 	} `json:"voice"`
 	AudioConfig struct {
 		AudioEncoding string  `json:"audioEncoding"`
-		SpeakingRate  float64 `json:"speakingRate"`
-		Pitch         float64 `json:"pitch"`
-		VolumeGainDb  float64 `json:"volumeGainDb"`
+		SpeakingRate  float64 `json:"speakingRate,omitempty"`
+		Pitch         float64 `json:"pitch,omitempty"`
+		VolumeGainDb  float64 `json:"volumeGainDb,omitempty"`
 	} `json:"audioConfig"`
 }
 

@@ -298,7 +298,7 @@ export default function App() {
                 const newAssessmentId = res['data']['assessmentId'];
                 setAssessmentId(newAssessmentId);
                 setIsStart(true);
-                sendChat('Hi, Please wait while we are getting ready', newAssessmentId);
+                sendChat('Hello', newAssessmentId);
             }
         });
     }

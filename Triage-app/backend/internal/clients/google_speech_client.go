@@ -2,31 +2,63 @@ package clients
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 var googleSpeechClient *GoogleSpeechClient
 
 type GoogleSpeechClient struct {
-	apiKey      string
+	projectID   string
 	sttEndpoint string
 	ttsEndpoint string
+	httpClient  *http.Client
 }
 
 // GetGoogleSpeechClient returns a singleton instance of GoogleSpeechClient
 func GetGoogleSpeechClient() *GoogleSpeechClient {
 	if googleSpeechClient == nil {
+		projectID := os.Getenv("GOOGLE_CLOUD_PROJECT_ID")
+		if projectID == "" {
+			projectID = "dochq-staging" // fallback
+		}
+
+		// Create OAuth2 client using environment variable for credentials
+		ctx := context.Background()
+		
+		// Check for GOOGLE_APPLICATION_CREDENTIALS environment variable
+		credentialsPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+		if credentialsPath == "" {
+			fmt.Printf("Warning: GOOGLE_APPLICATION_CREDENTIALS not set\n")
+		}
+		
+		creds, err := google.FindDefaultCredentials(ctx, 
+			"https://www.googleapis.com/auth/cloud-platform")
+		if err != nil {
+			// Log error but continue - will be handled in individual methods
+			fmt.Printf("Warning: Google credentials not found: %v\n", err)
+			fmt.Printf("Make sure GOOGLE_APPLICATION_CREDENTIALS points to your service account key file\n")
+		}
+
+		var httpClient *http.Client
+		if creds != nil {
+			httpClient = oauth2.NewClient(ctx, creds.TokenSource)
+		} else {
+			httpClient = &http.Client{}
+		}
+
 		googleSpeechClient = &GoogleSpeechClient{
-			// Get API key from environment variable
-			apiKey: os.Getenv("GOOGLE_CLOUD_API_KEY"),
-			// Google Speech-to-Text API endpoint
+			projectID:   projectID,
 			sttEndpoint: "https://speech.googleapis.com/v1/speech:recognize",
-			// Google Text-to-Speech API endpoint
 			ttsEndpoint: "https://texttospeech.googleapis.com/v1/text:synthesize",
+			httpClient:  httpClient,
 		}
 	}
 	return googleSpeechClient
@@ -46,13 +78,12 @@ func (c *GoogleSpeechClient) SpeechToText(request interface{}) (map[string]inter
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers
+	// Set headers for OAuth authentication
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Goog-Api-Key", c.apiKey)
+	req.Header.Set("X-Goog-User-Project", c.projectID)
 
-	// Make the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	// Make the request using authenticated HTTP client
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -64,9 +95,15 @@ func (c *GoogleSpeechClient) SpeechToText(request interface{}) (map[string]inter
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Check for errors
+	// Check for errors with detailed error messages
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		if resp.StatusCode == 401 {
+			return nil, fmt.Errorf("authentication failed - check GOOGLE_APPLICATION_CREDENTIALS (status %d): %s", resp.StatusCode, string(body))
+		} else if resp.StatusCode == 403 {
+			return nil, fmt.Errorf("permission denied - check project ID and API permissions (status %d): %s", resp.StatusCode, string(body))
+		} else {
+			return nil, fmt.Errorf("Google Speech API error (status %d): %s", resp.StatusCode, string(body))
+		}
 	}
 
 	// Parse response
@@ -78,7 +115,7 @@ func (c *GoogleSpeechClient) SpeechToText(request interface{}) (map[string]inter
 	return result, nil
 }
 
-// TextToSpeech converts text to audio using Google Text-to-Speech API
+// TextToSpeech converts text to audio using Google Text-to-Speech API with Chirp models
 func (c *GoogleSpeechClient) TextToSpeech(request interface{}) (map[string]interface{}, error) {
 	// Convert request to JSON
 	jsonData, err := json.Marshal(request)
@@ -92,13 +129,12 @@ func (c *GoogleSpeechClient) TextToSpeech(request interface{}) (map[string]inter
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers
+	// Set headers for OAuth authentication
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Goog-Api-Key", c.apiKey)
+	req.Header.Set("X-Goog-User-Project", c.projectID)
 
-	// Make the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	// Make the request using authenticated HTTP client
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -110,9 +146,15 @@ func (c *GoogleSpeechClient) TextToSpeech(request interface{}) (map[string]inter
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Check for errors
+	// Check for errors with detailed error messages
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		if resp.StatusCode == 401 {
+			return nil, fmt.Errorf("authentication failed - check GOOGLE_APPLICATION_CREDENTIALS (status %d): %s", resp.StatusCode, string(body))
+		} else if resp.StatusCode == 403 {
+			return nil, fmt.Errorf("permission denied - check project ID and API permissions (status %d): %s", resp.StatusCode, string(body))
+		} else {
+			return nil, fmt.Errorf("Google Speech API error (status %d): %s", resp.StatusCode, string(body))
+		}
 	}
 
 	// Parse response
