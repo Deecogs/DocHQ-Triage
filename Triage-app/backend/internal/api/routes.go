@@ -28,7 +28,10 @@ func SetupRoutes(router *gin.Engine) {
 	router.GET("/assessments/:assessmentId/rom", handlers.GetROMAnalysisByAssessmentId)
 	router.GET("/assessments/:assessmentId/dashboard", handlers.GetDashboardData)
 	router.GET("/assessments/:assessmentId/dashboardByAssessmentId", handlers.GetDashboardDataByAssessmentId)
-	
+
+	router.GET("/api/test-google-auth", handlers.TestGoogleAuth)
+
+	router.GET("/api/speech/health", handlers.HealthCheckSpeech)
 
 	// AI Analysis routes
 	// router.GET("/assessments/:assessmentId/ai-analysis", handlers.GetAIAnalysis)
