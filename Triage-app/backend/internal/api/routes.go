@@ -1,3 +1,4 @@
+// backend/internal/api/routes.go
 package api
 
 import (
@@ -29,22 +30,10 @@ func SetupRoutes(router *gin.Engine) {
 	router.GET("/assessments/:assessmentId/dashboard", handlers.GetDashboardData)
 	router.GET("/assessments/:assessmentId/dashboardByAssessmentId", handlers.GetDashboardDataByAssessmentId)
 
-	router.GET("/api/test-google-auth", handlers.TestGoogleAuth)
-
-	router.GET("/api/speech/health", handlers.HealthCheckSpeech)
-
-	// AI Analysis routes
-	// router.GET("/assessments/:assessmentId/ai-analysis", handlers.GetAIAnalysis)
-
-	// Self-Care Plan routes
-	// router.GET("/assessments/:assessmentId/self-care-plans", handlers.GetSelfCarePlans)
-
-	// Physio Call Schedules routes
-	// router.POST("/assessments/:assessmentId/physio-calls", handlers.SchedulePhysioCall)
-	// router.GET("/assessments/:assessmentId/physio-calls", handlers.GetPhysioCalls)
-
 	// Google Speech API routes
 	router.POST("/api/speech-to-text", handlers.SpeechToText)
 	router.POST("/api/text-to-speech", handlers.TextToSpeech)
 
+	// Demo route
+	router.GET("/bothandler", handlers.BotHandler)
 }
