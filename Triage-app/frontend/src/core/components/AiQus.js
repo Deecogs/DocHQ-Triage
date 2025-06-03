@@ -1,7 +1,4 @@
-// Update the AiQus component to properly handle chat history:
 import React, { useEffect, useRef, useState } from 'react';
-import "@tensorflow/tfjs";
-import * as tf from "@tensorflow/tfjs";
 import { Camera, Mic } from 'lucide-react';
 import { AnimatePresence, motion } from "motion/react";
 
@@ -14,16 +11,13 @@ export default function AiQus(props) {
     const [localHistory, setLocalHistory] = useState([]);
     
     const init = async () => {
-        await tf.ready();
-        await tf.setBackend("webgl");
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localStreamRef.current.srcObject = stream;
-        
-        // Send initial message to get first question
-        const response = await props.send("hi");
-        if (response?.question) {
-            setCurrentQuestion(response);
-            setLocalHistory([{ user: "hi", response: response.question }]);
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            if (localStreamRef.current) {
+                localStreamRef.current.srcObject = stream;
+            }
+        } catch (error) {
+            console.error('Error accessing camera/microphone:', error);
         }
     };
 

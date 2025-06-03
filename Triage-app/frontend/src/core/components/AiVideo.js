@@ -1,36 +1,30 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AnimatePresence, motion } from "motion/react";
-import * as poseDetection from "@tensorflow-models/pose-detection";
-import "@tensorflow/tfjs";
-import * as tf from "@tensorflow/tfjs";
 
-export default function AiVideo(props) {
-    const localStreamRef = useRef();
-    const canvasRef = useRef(null);
+export default function AiVideo({ step, next }) {
+    const videoRef = useRef(null);
+    const mediaRecorderRef = useRef(null);
+    const chunksRef = useRef([]);
     const [timer, setTimer] = useState(5);
+    const [isRecording, setIsRecording] = useState(false);
+    const hasProcessedRef = useRef(false);
 
-    // Function to capture frame and convert to base64
-    const captureFrame = () => {
-        if (localStreamRef.current && localStreamRef.current.videoWidth > 0) {
-            const canvas = document.createElement('canvas');
-            canvas.width = localStreamRef.current.videoWidth;
-            canvas.height = localStreamRef.current.videoHeight;
-            
-            const ctx = canvas.getContext('2d');
-            // Draw the current video frame to the canvas
-            ctx.drawImage(localStreamRef.current, 0, 0, canvas.width, canvas.height);
-            
-            // Convert the canvas to base64
-            const base64Image = canvas.toDataURL('image/jpeg');
-            return base64Image;
-        }
-        return null;
-    };
+    // Convert blob to base64
+    const blobToBase64 = useCallback((blob) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    }, []);
 
-    const init = async () => {
+    // Initialize camera and start recording
+    const startRecording = useCallback(async () => {
         try {
-            await tf.ready();
-            await tf.setBackend("webgl");
+            console.log("Starting video recording...");
+            
+            // Get camera stream
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 video: {
                     width: { ideal: 1280 },
@@ -39,147 +33,167 @@ export default function AiVideo(props) {
                 audio: false 
             });
             
-            if (localStreamRef.current) {
-                localStreamRef.current.srcObject = stream;
-                
-                // Wait for video to be ready before starting pose detection
-                localStreamRef.current.onloadedmetadata = () => {
-                    detectPose();
-                };
+            // Set video source
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
             }
-        } catch (error) {
-            console.error("Error accessing camera:", error);
-        }
-    };
 
-    const detectPose = async () => {
-        try {
-            const detector = await poseDetection.createDetector(
-                poseDetection.SupportedModels.MoveNet
-            );
+            // Initialize MediaRecorder
+            const mimeType = 'video/webm;codecs=vp8,opus';
+            const options = { mimeType };
+            
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                console.warn(`${mimeType} is not supported, using default`);
+                options.mimeType = 'video/webm';
+            }
 
-            const detect = async () => {
-                if (localStreamRef.current && localStreamRef.current.readyState === 4 && detector) {
-                    const poses = await detector.estimatePoses(localStreamRef.current);
+            const mediaRecorder = new MediaRecorder(stream, options);
+            mediaRecorderRef.current = mediaRecorder;
+            chunksRef.current = [];
 
-                    if (canvasRef.current) {
-                        const ctx = canvasRef.current.getContext("2d");
-                        
-                        // Set canvas dimensions to match video
-                        canvasRef.current.width = localStreamRef.current.videoWidth;
-                        canvasRef.current.height = localStreamRef.current.videoHeight;
-                        
-                        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-
-                        poses.forEach((pose) => {
-                            pose.keypoints.forEach((keypoint) => {
-                                if (keypoint.score > 0.3) {
-                                    const { x, y } = keypoint;
-                                    ctx.beginPath();
-                                    ctx.arc(x, y, 5, 0, 2 * Math.PI);
-                                    ctx.fillStyle = "red";
-                                    ctx.fill();
-                                }
-                            });
-                        });
-                    }
-                }
-                
-                if (parseInt(props.step) === 8) {
-                    requestAnimationFrame(detect);
+            // Handle data available
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    chunksRef.current.push(event.data);
                 }
             };
 
-            detect();
+            // Handle recording stop
+            mediaRecorder.onstop = async () => {
+                console.log("Recording stopped, processing video...");
+                
+                // Create blob from chunks
+                const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+                
+                // Convert to base64
+                try {
+                    const base64Video = await blobToBase64(blob);
+                    console.log("Video converted to base64, size:", base64Video.length);
+                    
+                    // Stop camera
+                    stream.getTracks().forEach(track => track.stop());
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = null;
+                    }
+                    
+                    // Send to parent
+                    if (next && !hasProcessedRef.current) {
+                        hasProcessedRef.current = true;
+                        // Use microtask to avoid React warning
+                        queueMicrotask(() => {
+                            next(base64Video);
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error converting video to base64:", error);
+                }
+            };
+
+            // Start recording
+            mediaRecorder.start();
+            setIsRecording(true);
+            console.log("Recording started");
+
         } catch (error) {
-            console.error("Error in pose detection:", error);
+            console.error("Error starting recording:", error);
+            alert("Unable to access camera. Please check permissions.");
         }
-    };
+    }, [blobToBase64, next]);
 
-    const onTimerEnd = () => {
-        // Capture the last frame before ending
-        const lastFrame = captureFrame();
-        
-        // Stop all tracks of the stream
-        if (localStreamRef.current && localStreamRef.current.srcObject) {
-            const tracks = localStreamRef.current.srcObject.getTracks();
-            tracks.forEach(track => track.stop());
-            localStreamRef.current.srcObject = null;
+    // Stop recording
+    const stopRecording = useCallback(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            console.log("Stopping recording...");
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
         }
-        
-        console.log("Captured frame for pain location");
-        
-        // Call the parent's next function with the captured image
-        if (props.next && lastFrame) {
-            props.next(lastFrame);
-        }
-    };
+    }, []);
 
-    // Stop camera function
-    const stopCamera = () => {
-        if (localStreamRef.current && localStreamRef.current.srcObject) {
-            const tracks = localStreamRef.current.srcObject.getTracks();
-            tracks.forEach(track => track.stop());
-            localStreamRef.current.srcObject = null;
-        }
-    };
-
+    // Initialize when step becomes 8
     useEffect(() => {
-        if (parseInt(props.step) === 8) {
-            init();
+        if (parseInt(step) === 8 && !isRecording && !hasProcessedRef.current) {
+            hasProcessedRef.current = false;
+            setTimer(5);
+            startRecording();
         }
         
+        // Cleanup when leaving step 8
         return () => {
-            stopCamera();
+            if (parseInt(step) !== 8) {
+                stopRecording();
+                if (videoRef.current && videoRef.current.srcObject) {
+                    const tracks = videoRef.current.srcObject.getTracks();
+                    tracks.forEach(track => track.stop());
+                    videoRef.current.srcObject = null;
+                }
+            }
         };
-    }, [props.step]);
+    }, [step, isRecording, startRecording, stopRecording]);
 
+    // Timer countdown
     useEffect(() => {
-        if (parseInt(props.step) === 8) {
+        if (parseInt(step) === 8 && isRecording) {
             const interval = setInterval(() => {
-                setTimer((prev) => {
+                setTimer(prev => {
                     if (prev <= 1) {
                         clearInterval(interval);
-                        onTimerEnd();
                         return 0;
                     }
                     return prev - 1;
                 });
             }, 1000);
-            
+
             return () => clearInterval(interval);
         }
-    }, [props.step]);
+    }, [step, isRecording]);
+
+    // Stop recording when timer reaches 0
+    useEffect(() => {
+        if (timer === 0 && isRecording) {
+            stopRecording();
+        }
+    }, [timer, isRecording, stopRecording]);
+
+    // Don't render if not on step 8
+    if (parseInt(step) !== 8) return null;
 
     return (
-        <AnimatePresence initial={false}>
-            {parseInt(props.step) === 8 && (
-                <motion.div 
-                    initial={{ opacity: 0, translateY: '300px' }} 
-                    animate={{ opacity: 1, translateY: 0 }} 
-                    exit={{ opacity: 0, translateY: '300px' }} 
-                    className='w-full h-screen flex items-center justify-center relative'
-                >
-                    <div className='w-[60%]'>
-                        <div className='w-full pt-[56.25%] relative border-[6px] border-primeLight rounded-[20px] overflow-hidden'>
-                            <video 
-                                ref={localStreamRef} 
-                                autoPlay 
-                                playsInline 
-                                muted 
-                                className='object-fill absolute inset-0 w-full h-full' 
-                            />
-                            <canvas 
-                                ref={canvasRef} 
-                                className='w-full h-full absolute top-0 left-0 pointer-events-none' 
-                            />
-                            <div className='bg-white absolute top-[10px] left-[10px] text-txtMain p-2 rounded-tl-[14px] rounded-tr-[2px] rounded-br-[14px] rounded-bl-[2px] text-sm'>
-                                Timer: {timer}s
-                            </div>
+        <AnimatePresence>
+            <motion.div 
+                initial={{ opacity: 0, translateY: '300px' }} 
+                animate={{ opacity: 1, translateY: 0 }} 
+                exit={{ opacity: 0, translateY: '300px' }} 
+                className='w-full h-screen flex items-center justify-center relative'
+            >
+                <div className='w-[60%]'>
+                    <div className='w-full pt-[56.25%] relative border-[6px] border-primeLight rounded-[20px] overflow-hidden shadow-2xl'>
+                        <video 
+                            ref={videoRef} 
+                            autoPlay 
+                            playsInline 
+                            muted 
+                            className='object-cover absolute inset-0 w-full h-full' 
+                        />
+                        
+                        {/* Timer */}
+                        <div className='bg-white absolute top-[20px] left-[20px] text-txtMain p-3 rounded-tl-[14px] rounded-tr-[2px] rounded-br-[14px] rounded-bl-[2px] text-lg font-semibold shadow-lg'>
+                            {isRecording ? (
+                                <div className='flex items-center gap-2'>
+                                    <div className='w-3 h-3 bg-red-500 rounded-full animate-pulse'></div>
+                                    Recording: {timer}s
+                                </div>
+                            ) : (
+                                'Processing...'
+                            )}
+                        </div>
+                        
+                        {/* Instructions */}
+                        <div className='bg-white/90 absolute bottom-[20px] left-1/2 transform -translate-x-1/2 px-6 py-2 rounded-full text-sm'>
+                            Please point to where you feel pain
                         </div>
                     </div>
-                </motion.div>
-            )}
+                </div>
+            </motion.div>
         </AnimatePresence>
     );
 }

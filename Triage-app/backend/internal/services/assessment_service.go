@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -40,12 +41,12 @@ type ChatMessage struct {
 
 type ChatRequest struct {
 	ChatHistory []ChatMessage `json:"chat_history"`
+	Video       string        `json:"video,omitempty"` // Add video field
 }
 
 type ChatResponse struct {
 	Response string `json:"response"`
 }
-
 
 // GetAssessmentByID retrieves an assessment by ID (stub implementation)
 func GetAssessmentByID(assessmentID uint32) (*Assessment, error) {
@@ -61,10 +62,9 @@ func GetAssessmentByID(assessmentID uint32) (*Assessment, error) {
 		CompletionPercentage: 50,
 		ChatHistory:          []ChatMessage{},
 	}
-	
+
 	return assessment, nil
 }
-
 
 type QuestionRequest struct {
 	QuestionHistory []QuestionMessage `json:"chat_history"`
@@ -243,50 +243,82 @@ func GetAssessment(assessmentID uint32) (*Assessment, error) {
 }
 
 // SendChatToAI sends chat history to the AI model and retrieves a response
-func SendChatToAI(assessmentIDUint uint32, chatMessage []ChatMessage) (APIResponse, error) {
+func SendChatToAI(assessmentIDUint uint32, chatRequest ChatRequest) (APIResponse, error) {
 	var aiResponse APIResponse
 
 	url := "https://deecogs-bpi-bot-844145949029.europe-west1.run.app/chat"
 
-	// Prepare the request payload
-	payload := ChatRequest{ChatHistory: chatMessage}
+	// Log what we're sending
+	log.Printf("=== SendChatToAI Request ===")
+	log.Printf("Assessment ID: %d", assessmentIDUint)
+	log.Printf("Chat history entries: %d", len(chatRequest.ChatHistory))
+	log.Printf("Has video: %v", chatRequest.Video != "")
+
+	// Build request payload
+	payload := map[string]interface{}{
+		"chat_history": chatRequest.ChatHistory,
+	}
+
+	// Add video field if present
+	if chatRequest.Video != "" {
+		payload["video"] = chatRequest.Video
+		log.Printf("Video field added, size: %d bytes", len(chatRequest.Video))
+	}
+
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return aiResponse, err
 	}
-	// log.Printf("Request: %v\n", bytes.NewBuffer(jsonData))
-	// Send the request to the AI model
+
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return aiResponse, err
 	}
 	defer resp.Body.Close()
 
-	log.Printf("Response: %v\n", resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return aiResponse, errors.New("failed to get a response from AI model")
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&aiResponse); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return aiResponse, err
 	}
 
+	log.Printf("AI API Response Status: %d", resp.StatusCode)
+	log.Printf("AI API Response: %.500s", string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		return aiResponse, fmt.Errorf("AI API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	if err := json.Unmarshal(body, &aiResponse); err != nil {
+		return aiResponse, err
+	}
+
+	// Log the action from response
+	if aiResponse.Data != nil {
+		if dataMap, ok := aiResponse.Data.(map[string]interface{}); ok {
+			if action, exists := dataMap["action"]; exists {
+				log.Printf("Action: %v", action)
+			}
+		}
+	}
+
+	// Save chat history if moving to next API
 	if aiResponse.Data != nil {
 		action := aiResponse.Data.(map[string]interface{})["action"]
-		log.Printf("Action: %v\n", action)
 		if action == "next_api" {
-			log.Println("Next API call")
-			//stringify the ChatRequest and save it in the database
+			// Save only chat history, not video
+			chatOnlyData := map[string]interface{}{
+				"chat_history": chatRequest.ChatHistory,
+			}
+			chatJsonData, _ := json.Marshal(chatOnlyData)
+
 			query := `UPDATE assessments SET chat_history = $1 WHERE assessment_id = $2 RETURNING assessment_id`
 			var assessmentID string
 
-			err = db.DB.QueryRow(context.Background(), query, jsonData, assessmentIDUint).Scan(&assessmentID)
+			err = db.DB.QueryRow(context.Background(), query, chatJsonData, assessmentIDUint).Scan(&assessmentID)
 			if err != nil {
-				return aiResponse, err
+				log.Printf("Error saving chat history: %v", err)
 			}
 		}
-
 	}
 
 	return aiResponse, nil

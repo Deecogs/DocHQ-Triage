@@ -3,7 +3,9 @@ package handlers
 import (
 	"ai-bot-deecogs/internal/clients"
 	"ai-bot-deecogs/internal/helpers"
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,9 +27,13 @@ func SpeechToText(c *gin.Context) {
 	var request SpeechToTextRequest
 
 	if err := c.ShouldBindJSON(&request); err != nil {
+		log.Printf("Error binding JSON: %v", err)
 		helpers.SendResponse(c.Writer, false, http.StatusBadRequest, nil, err)
 		return
 	}
+
+	// Log request details
+	log.Printf("Speech-to-Text request received, audio size: %d", len(request.AudioContent))
 
 	// Convert to Google API format
 	googleRequest := map[string]interface{}{
@@ -46,6 +52,7 @@ func SpeechToText(c *gin.Context) {
 
 	result, err := clients.GetGoogleSpeechClient().SpeechToText(googleRequest)
 	if err != nil {
+		log.Printf("Speech-to-Text error: %v", err)
 		helpers.SendResponse(c.Writer, false, http.StatusInternalServerError, nil, err)
 		return
 	}
@@ -64,6 +71,8 @@ func SpeechToText(c *gin.Context) {
 		}
 	}
 
+	log.Printf("Speech-to-Text result: %s", transcript)
+
 	// Return in expected format
 	helpers.SendResponse(c.Writer, true, http.StatusOK, map[string]interface{}{
 		"transcript": transcript,
@@ -74,9 +83,12 @@ func TextToSpeech(c *gin.Context) {
 	var request TextToSpeechRequest
 
 	if err := c.ShouldBindJSON(&request); err != nil {
+		log.Printf("Error binding JSON: %v", err)
 		helpers.SendResponse(c.Writer, false, http.StatusBadRequest, nil, err)
 		return
 	}
+
+	log.Printf("Text-to-Speech request received for text: %s", request.Text)
 
 	// Convert to Google API format
 	googleRequest := map[string]interface{}{
@@ -95,6 +107,7 @@ func TextToSpeech(c *gin.Context) {
 
 	result, err := clients.GetGoogleSpeechClient().TextToSpeech(googleRequest)
 	if err != nil {
+		log.Printf("Text-to-Speech error: %v", err)
 		helpers.SendResponse(c.Writer, false, http.StatusInternalServerError, nil, err)
 		return
 	}
@@ -108,5 +121,21 @@ func TextToSpeech(c *gin.Context) {
 	// Return in expected format
 	helpers.SendResponse(c.Writer, true, http.StatusOK, map[string]interface{}{
 		"audio_content": audioContent,
+	}, nil)
+}
+
+// SpeechHealthCheck checks if Google Speech APIs are properly configured
+func SpeechHealthCheck(c *gin.Context) {
+	client := clients.GetGoogleSpeechClient()
+
+	// Check if API key is set
+	apiKeySet := false
+	if os.Getenv("GOOGLE_CLOUD_API_KEY") != "" {
+		apiKeySet = true
+	}
+
+	helpers.SendResponse(c.Writer, true, http.StatusOK, map[string]interface{}{
+		"api_key_configured": apiKeySet,
+		"api_working":        apiKeySet, // Simplified check
 	}, nil)
 }

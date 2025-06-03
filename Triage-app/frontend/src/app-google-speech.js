@@ -23,6 +23,7 @@ export default function App() {
     const [assessmentId, setAssessmentId] = useState(null);
     const assessmentIdRef = useRef(null);
     const [step, setStep] = useState(0);
+    const [speechAPIAvailable, setSpeechAPIAvailable] = useState(true);
 
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
@@ -32,10 +33,15 @@ export default function App() {
 
     const mainService = new ServiceChat();
     const googleSpeechService = new ServiceGoogleSpeech();
+    
+    // Browser speech recognition fallback
+    const recognitionRef = useRef(null);
+    const synthRef = useRef(window.speechSynthesis);
 
     // Initialize media recorder
     const initMediaRecorder = useCallback(async () => {
         try {
+            console.log('Initializing media recorder...');
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 audio: {
                     echoCancellation: true,
@@ -58,11 +64,16 @@ export default function App() {
             };
 
             recorder.onstop = async () => {
+                console.log('Recording stopped, processing audio...');
                 const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
                 audioChunksRef.current = [];
                 
                 if (audioBlob.size > 0) {
                     await handleSpeechToText(audioBlob);
+                } else {
+                    console.warn('No audio data captured');
+                    setStatus("No audio captured. Please try again.");
+                    setTimeout(() => startListening(), 1000);
                 }
             };
 
@@ -77,19 +88,55 @@ export default function App() {
             source.connect(analyserNode);
             setAnalyser(analyserNode);
             
+            console.log('Media recorder initialized successfully');
+            // Start listening immediately after initialization
+            setTimeout(() => startListening(), 100);
+            
         } catch (error) {
             console.error('Error initializing media recorder:', error);
-            setStatus("Microphone access denied");
+            setStatus("Microphone access denied. Please allow microphone access and refresh.");
         }
-    }, []);
+    }, [handleSpeechToText]);
 
-    // Handle speech to text
+    // Handle speech to text with fallback
     const handleSpeechToText = useCallback(async (audioBlob) => {
         try {
             setStatus("Processing speech...");
-            const transcript = await googleSpeechService.speechToText(audioBlob);
+            let transcript = null;
+            
+            // Try Google Speech API first if available
+            if (speechAPIAvailable && audioBlob) {
+                try {
+                    transcript = await googleSpeechService.speechToText(audioBlob);
+                } catch (apiError) {
+                    console.warn('Google STT failed:', apiError);
+                    setSpeechAPIAvailable(false);
+                }
+            }
+            
+            // If no transcript and browser recognition available, use it
+            if (!transcript && recognitionRef.current && !audioBlob) {
+                transcript = await new Promise((resolve) => {
+                    recognitionRef.current.onresult = (event) => {
+                        const result = event.results[0][0].transcript;
+                        resolve(result);
+                    };
+                    
+                    recognitionRef.current.onerror = () => {
+                        resolve(null);
+                    };
+                    
+                    recognitionRef.current.onend = () => {
+                        if (!transcript) resolve(null);
+                    };
+                    
+                    recognitionRef.current.start();
+                    setStatus("Listening (browser mode)...");
+                });
+            }
             
             if (transcript) {
+                console.log('Speech recognized:', transcript);
                 // Determine which API to call based on current step
                 if (step >= 11) {
                     // We're in QnA phase
@@ -99,25 +146,20 @@ export default function App() {
                     await sendChat(transcript, assessmentIdRef.current);
                 }
             } else {
+                console.warn('No transcript received, prompting retry');
                 setStatus("Could not understand. Please try again.");
-                setTimeout(() => {
-                    if (isMountedRef.current) {
-                        startListening();
-                    }
-                }, 1000);
+                // Give user feedback and restart listening
+                await speakText("I couldn't understand that. Please try again.", true, true);
             }
         } catch (error) {
             console.error('Speech-to-Text error:', error);
             setStatus("Error processing speech. Please try again.");
-            setTimeout(() => {
-                if (isMountedRef.current) {
-                    startListening();
-                }
-            }, 1000);
+            // Give user feedback and restart listening
+            await speakText("Sorry, there was an error. Please try again.", true, true);
         }
-    }, [step]);
+    }, [step, googleSpeechService, speakText, speechAPIAvailable]);
 
-    // Text to speech handler
+    // Text to speech handler with improved fallback
     const speakText = useCallback(async (text, isAiSpeaking = false, listenNext = true, stepNumber = 0) => {
         try {
             setAiSpeaking(true);
@@ -125,8 +167,18 @@ export default function App() {
                 setStatus("AI is speaking...");
             }
 
-            const audioBlob = await googleSpeechService.textToSpeech(text);
-            await googleSpeechService.playAudio(audioBlob);
+            if (speechAPIAvailable) {
+                try {
+                    const audioBlob = await googleSpeechService.textToSpeech(text);
+                    await googleSpeechService.playAudio(audioBlob);
+                } catch (apiError) {
+                    console.warn('Google TTS failed, using browser TTS');
+                    setSpeechAPIAvailable(false);
+                    throw apiError; // Fall through to browser TTS
+                }
+            } else {
+                throw new Error('Speech API not available');
+            }
 
             setAiSpeaking(false);
             setStatus("");
@@ -137,6 +189,7 @@ export default function App() {
 
             // Handle video step timing
             if (stepNumber === 8) {
+                console.log('Preparing for video capture step');
                 setTimeout(() => {
                     setCurrentDisplayText("");
                     setStep(stepNumber);
@@ -150,27 +203,115 @@ export default function App() {
                 setTimeout(() => setCurrentDisplayText(""), 5000);
             }
         } catch (error) {
-            console.error('Text-to-Speech error:', error);
-            setAiSpeaking(false);
-            setStatus("");
+            console.error('TTS error, using browser fallback:', error.message);
+            setAiSpeaking(true);
             
-            // Fallback to browser TTS
-            if ("speechSynthesis" in window) {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.rate = 0.8;
-                utterance.onend = () => {
+            // Use browser TTS as fallback
+            return new Promise((resolve) => {
+                if (synthRef.current) {
+                    // Cancel any ongoing speech
+                    synthRef.current.cancel();
+                    
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.9;
+                    utterance.pitch = 1.0;
+                    
+                    utterance.onend = () => {
+                        setAiSpeaking(false);
+                        setStatus("");
+                        if (listenNext && isMountedRef.current) {
+                            startListening();
+                        }
+                        
+                        // Handle video step timing
+                        if (stepNumber === 8) {
+                            console.log('Preparing for video capture step');
+                            setTimeout(() => {
+                                setCurrentDisplayText("");
+                                setStep(stepNumber);
+                            }, 5000);
+
+                            for (let i = 5; i > 0; i--) {
+                                setTimeout(() => {
+                                    setCurrentDisplayText(`Please be ready in ${i} seconds`);
+                                }, (5 - i) * 1000);
+                            }
+                            setTimeout(() => setCurrentDisplayText(""), 5000);
+                        }
+                        
+                        resolve();
+                    };
+                    
+                    utterance.onerror = () => {
+                        setAiSpeaking(false);
+                        setStatus("");
+                        if (listenNext && isMountedRef.current) {
+                            startListening();
+                        }
+                        resolve();
+                    };
+                    
+                    synthRef.current.speak(utterance);
+                } else {
+                    setAiSpeaking(false);
+                    setStatus("");
                     if (listenNext && isMountedRef.current) {
                         startListening();
                     }
-                };
-                window.speechSynthesis.speak(utterance);
-            }
+                    resolve();
+                }
+            });
         }
-    }, [googleSpeechService]);
+    }, [googleSpeechService, speechAPIAvailable]);
 
-    // Start listening
+    // Start listening with fallback support
     const startListening = useCallback(() => {
+        console.log('Starting listening, current step:', step);
+        console.log('Speech API available:', speechAPIAvailable);
+        
+        // If speech API not available and browser recognition exists, use it
+        if (!speechAPIAvailable && recognitionRef.current) {
+            console.log('Using browser speech recognition');
+            setIsListening(true);
+            setStatus("Listening (browser)...");
+            
+            recognitionRef.current.onresult = async (event) => {
+                const transcript = event.results[0][0].transcript;
+                console.log('Browser recognition result:', transcript);
+                setIsListening(false);
+                
+                // Process the transcript
+                if (step >= 11) {
+                    await sendAnswerToAPI(transcript, assessmentIdRef.current);
+                } else {
+                    await sendChat(transcript, assessmentIdRef.current);
+                }
+            };
+            
+            recognitionRef.current.onerror = (event) => {
+                console.error('Browser recognition error:', event.error);
+                setIsListening(false);
+                setStatus("Error: Could not understand. Please try again.");
+                setTimeout(() => startListening(), 2000);
+            };
+            
+            recognitionRef.current.onend = () => {
+                setIsListening(false);
+            };
+            
+            try {
+                recognitionRef.current.start();
+            } catch (error) {
+                console.error('Error starting browser recognition:', error);
+                setStatus("Error: Could not start listening");
+                setIsListening(false);
+            }
+            return;
+        }
+        
+        // Use media recorder for Google Speech API
         if (!mediaRecorderRef.current) {
+            console.log('Media recorder not initialized, initializing...');
             initMediaRecorder();
             return;
         }
@@ -180,110 +321,190 @@ export default function App() {
             setStatus("Listening...");
             audioChunksRef.current = [];
             
-            mediaRecorderRef.current.start();
-            
-            // Auto-stop after 5 seconds
-            setTimeout(() => {
-                if (mediaRecorderRef.current?.state === 'recording') {
-                    stopListening();
-                }
-            }, 5000);
+            try {
+                mediaRecorderRef.current.start();
+                console.log('Recording started');
+                
+                // Auto-stop after 5 seconds
+                setTimeout(() => {
+                    if (mediaRecorderRef.current?.state === 'recording') {
+                        console.log('Auto-stopping recording after 5 seconds');
+                        stopListening();
+                    }
+                }, 5000);
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                setStatus("Error: Could not start recording");
+                setIsListening(false);
+            }
+        } else {
+            console.log('Media recorder already in state:', mediaRecorderRef.current.state);
         }
-    }, [initMediaRecorder]);
+    }, [initMediaRecorder, step, speechAPIAvailable, sendAnswerToAPI, sendChat]);
 
     // Stop listening
     const stopListening = useCallback(() => {
+        if (recognitionRef.current) {
+            try {
+                recognitionRef.current.stop();
+            } catch (e) {
+                // Ignore errors when stopping
+            }
+        }
+        
         if (mediaRecorderRef.current?.state === 'recording') {
             mediaRecorderRef.current.stop();
-            setIsListening(false);
         }
+        
+        setIsListening(false);
     }, []);
 
-    // Send chat message (for initial conversation)
-    const sendChat = useCallback(async (message, assID, isImage = false) => {
-        if (!isImage) {
+    // Send chat message - FIXED VERSION
+    const sendChat = useCallback(async (message, assID, isVideo = false) => {
+        console.log("=== sendChat called ===");
+        console.log("Message type:", isVideo ? "Video" : "Text");
+        console.log("Assessment ID:", assID);
+        
+        if (!isVideo) {
             setCurrentDisplayText(message);
         }
-        setStatus("Talking to the AI...");
+        setStatus(isVideo ? "Processing video..." : "Talking to the AI...");
         setIsListening(false);
         stopListening();
 
-        // Create new message object
-        const newMessage = { user: message };
-        
-        setChatHistory(prevChats => {
-            const updatedChats = [...prevChats, newMessage];
+        try {
+            let bodyChat;
             
-            // Create request body
-            const bodyChat = {
-                chat_history: updatedChats
-            };
-            
-            // If it's an image, add video field
-            if (isImage) {
-                bodyChat.video = message; // message contains base64 image
+            if (!isVideo) {
+                // For text messages: Add to chat history
+                const newMessage = { user: message };
+                const updatedChats = [...chatHistory, newMessage];
+                
+                bodyChat = {
+                    chat_history: updatedChats
+                };
+                
+                // Update local state immediately
+                setChatHistory(updatedChats);
+            } else {
+                // For video: DO NOT add to chat history, send current history with video field
+                bodyChat = {
+                    chat_history: chatHistory,  // Use existing history as-is
+                    video: message  // Add video as separate field
+                };
+                console.log("Sending video for body part identification");
+                console.log("Video size:", message.length);
             }
 
-            mainService.chatWithAI(bodyChat, '', assID)
-                .then(async (res) => {
-                    if (res?.success) {
-                        if (!isStart) {
-                            setStage("chat");
-                        }
-                        
-                        const chatRes = res.data.response;
-                        
-                        // Update chat history with response field
-                        setChatHistory(latestChats => {
-                            const updated = [...latestChats];
-                            if (updated.length > 0) {
-                                updated[updated.length - 1].response = chatRes;
-                            }
-                            return updated;
-                        });
-                        
-                        const next_action = res.data.action;
-                        
-                        if (next_action === "camera_on") {
-                            setCurrentDisplayText(chatRes);
-                            await speakText(chatRes, true, false, 8);
-                        } else if (next_action !== "next_api") {
-                            setCurrentDisplayText(chatRes);
-                            await speakText(chatRes, true);
-                        } else {
-                            // Moving to QnA phase
-                            setCurrentDisplayText("");
-                            await speakText(chatRes, true, false);
-                            setStep(11);
-                            setAnalyser(false);
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Chat API error:', error);
-                    setStatus("Error communicating with AI");
-                    setTimeout(() => {
-                        if (isMountedRef.current) {
-                            startListening();
-                        }
-                    }, 2000);
-                });
+            const res = await mainService.chatWithAI(bodyChat, '', assID);
             
-            return updatedChats;
-        });
-    }, [isStart, mainService, speakText, startListening, stopListening]);
+            console.log("=== AI Response ===");
+            console.log("Success:", res?.success);
+            console.log("Response:", res?.data);
+            
+            if (res?.success) {
+                if (!isStart) {
+                    setStage("chat");
+                }
+                
+                const chatRes = res.data.response;
+                const next_action = res.data.action;
+                
+                console.log("AI says:", chatRes);
+                console.log("Action:", next_action);
+                
+                if (!isVideo) {
+                    // For text messages: Update the last entry with response
+                    setChatHistory(prevChats => {
+                        const updated = [...prevChats];
+                        if (updated.length > 0 && !updated[updated.length - 1].response) {
+                            updated[updated.length - 1].response = chatRes;
+                        }
+                        return updated;
+                    });
+                } else {
+                    // For video responses: Add as new complete entry
+                    setChatHistory(prevChats => {
+                        return [...prevChats, {
+                            user: "[Showed pain location]",
+                            response: chatRes
+                        }];
+                    });
+                }
+                
+                // Handle actions
+                if (next_action === "camera_on") {
+                    console.log("Activating camera for body part identification");
+                    setCurrentDisplayText(chatRes);
+                    await speakText(chatRes, true, false, 8);
+                } else if (next_action === "next_api") {
+                    console.log("Moving to QnA phase");
+                    setCurrentDisplayText("");
+                    await speakText(chatRes, true, false);
+                    // Add small delay before transitioning to ensure smooth flow
+                    setTimeout(() => {
+                        setStep(11);
+                        setAnalyser(false);
+                    }, 500);
+                } else {
+                    setCurrentDisplayText(chatRes);
+                    await speakText(chatRes, true);
+                }
+            } else {
+                console.error("API call failed:", res);
+                setStatus("Error: Failed to get response");
+            }
+        } catch (error) {
+            console.error('Chat API error:', error);
+            setStatus("Error communicating with AI");
+            setTimeout(() => {
+                if (isMountedRef.current) {
+                    startListening();
+                }
+            }, 2000);
+        }
+    }, [chatHistory, isStart, mainService, speakText, startListening, stopListening]);
+
+    // Handle video from video capture - RENAMED AND UPDATED
+    const sendPainPointVideo = useCallback((base64Video) => {
+        console.log("=== sendPainPointVideo called ===");
+        console.log("Has video:", !!base64Video);
+        console.log("Video size:", base64Video?.length || 0);
+        console.log("Assessment ID:", assessmentId);
+        console.log("Assessment ID Ref:", assessmentIdRef.current);
+        
+        // Use ref value which is more reliable
+        const currentAssessmentId = assessmentIdRef.current || assessmentId;
+        
+        if (base64Video && currentAssessmentId) {
+            console.log("Sending video to AI for body part identification");
+            sendChat(base64Video, currentAssessmentId, true);
+        } else {
+            console.error("Missing video or assessment ID");
+            setStatus("Error: Could not process video. Please try again.");
+            // Go back to chat state
+            setTimeout(() => {
+                setStep(7);
+                startListening();
+            }, 2000);
+        }
+    }, [assessmentId, sendChat, startListening]);
 
     // Send answer to QnA API (for questionnaire phase)
     const sendAnswerToAPI = useCallback(async (answer, assID) => {
+        console.log('=== sendAnswerToAPI called ===');
+        console.log('Answer:', answer);
+        console.log('Assessment ID:', assID);
+        
         setStatus("Processing answer...");
         setIsListening(false);
         stopListening();
 
-        // Create the message with user and prepare for response
         const newMessage = { user: answer };
         
         setQnAHistory(prevHistory => {
             const updatedHistory = [...prevHistory, newMessage];
+            console.log('Updated QnA history:', updatedHistory);
             
             const bodyChat = {
                 chat_history: updatedHistory
@@ -291,6 +512,7 @@ export default function App() {
 
             mainService.chatWithQnAAI(bodyChat, '', assID)
                 .then((res) => {
+                    console.log('QnA API response:', res);
                     if (res?.success) {
                         if (isStart) {
                             setStage("QnA");
@@ -299,7 +521,6 @@ export default function App() {
                         const questionRes = res.data;
                         setNextQuestion(questionRes);
                         
-                        // Update the last message with the assistant's response
                         setQnAHistory(prev => {
                             const updated = [...prev];
                             if (updated.length > 0) {
@@ -308,12 +529,20 @@ export default function App() {
                             return updated;
                         });
                         
-                        // Check if we need to move to next phase
                         if (questionRes.action === "rom_api") {
-                            setStep(20); // Move to ROM phase
+                            console.log('Moving to ROM phase');
+                            setStep(20);
                         } else if (questionRes.action === "dashboard_api") {
-                            setStep(24); // Move to dashboard
+                            console.log('Moving to Dashboard phase');
+                            setStep(24);
+                        } else {
+                            // Speak the next question and continue listening
+                            speakText(questionRes.question, true, true);
                         }
+                    } else {
+                        console.error('QnA API returned unsuccessful response');
+                        setStatus("Error: Invalid response from server");
+                        setTimeout(() => startListening(), 2000);
                     }
                 })
                 .catch(error => {
@@ -328,7 +557,7 @@ export default function App() {
             
             return updatedHistory;
         });
-    }, [isStart, mainService, stopListening]);
+    }, [isStart, mainService, stopListening, speakText]);
 
     // Start assessment
     const startAssessment = useCallback(() => {
@@ -362,28 +591,39 @@ export default function App() {
     // Initialize on mount
     useEffect(() => {
         isMountedRef.current = true;
+        
+        // Check if speech API is available
+        googleSpeechService.checkHealth().then(isAvailable => {
+            setSpeechAPIAvailable(isAvailable);
+            console.log('Speech API available:', isAvailable);
+        });
+        
+        // Initialize browser speech recognition as fallback
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognitionRef.current = new SpeechRecognition();
+            recognitionRef.current.continuous = false;
+            recognitionRef.current.interimResults = false;
+            recognitionRef.current.lang = 'en-US';
+        }
+        
         initMediaRecorder();
 
         return () => {
             isMountedRef.current = false;
             
-            // Cleanup
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => track.stop());
             }
             if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
                 audioContextRef.current.close();
             }
+            if (recognitionRef.current) {
+                recognitionRef.current.abort();
+            }
             window.speechSynthesis.cancel();
         };
-    }, [initMediaRecorder]);
-
-    // Handle pain point image from video capture
-    const sendPainPointImage = useCallback((base64Image) => {
-        if (base64Image && assessmentId) {
-            sendChat(base64Image, assessmentId, true);
-        }
-    }, [assessmentId, sendChat]);
+    }, [initMediaRecorder, googleSpeechService]);
 
     // Save ROM data
     const saveRomData = useCallback(async (romData) => {
@@ -419,7 +659,7 @@ export default function App() {
                 </div>
             </div>
             
-            <AiVideo step={step} next={sendPainPointImage} />
+            <AiVideo step={step} next={sendPainPointVideo} />
             
             <AiQus 
                 step={step}

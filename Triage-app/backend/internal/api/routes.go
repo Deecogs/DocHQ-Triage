@@ -33,6 +33,7 @@ func SetupRoutes(router *gin.Engine) {
 	// Google Speech API routes
 	router.POST("/api/speech-to-text", handlers.SpeechToText)
 	router.POST("/api/text-to-speech", handlers.TextToSpeech)
+	router.GET("/api/speech/health", handlers.SpeechHealthCheck)
 
 	// Demo route
 	router.GET("/bothandler", handlers.BotHandler)

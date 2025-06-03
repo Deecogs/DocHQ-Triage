@@ -31,16 +31,22 @@ class ServiceGoogleSpeech {
                 language_code: languageCode
             };
 
-            const response = await axios.post(this.GOOGLE_STT_API, requestBody);
+            console.log('Sending speech-to-text request, audio size:', audioContent.length);
+            const response = await axios.post(this.GOOGLE_STT_API, requestBody, {
+                timeout: 30000 // 30 second timeout
+            });
             
             if (response.data?.success && response.data?.data?.transcript) {
+                console.log('Speech-to-text successful:', response.data.data.transcript);
                 return response.data.data.transcript;
             }
             
-            return '';
+            console.warn('Speech-to-text returned no transcript');
+            return null; // Return null instead of empty string to indicate failure
         } catch (error) {
-            console.warn('Speech-to-Text failed, returning empty:', error.message);
-            return '';
+            console.error('Speech-to-Text error:', error.response?.data || error.message);
+            // Return null to indicate failure, let the caller handle retry
+            return null;
         }
     }
 
@@ -53,16 +59,21 @@ class ServiceGoogleSpeech {
                 speaking_rate: options.speakingRate || 0.9
             };
 
-            const response = await axios.post(this.GOOGLE_TTS_API, requestBody);
+            console.log('Sending text-to-speech request for:', text.substring(0, 50) + '...');
+            const response = await axios.post(this.GOOGLE_TTS_API, requestBody, {
+                timeout: 30000 // 30 second timeout
+            });
             
             if (response.data?.success && response.data?.data?.audio_content) {
+                console.log('Text-to-speech successful');
                 return this.base64ToBlob(response.data.data.audio_content, 'audio/wav');
             }
             
             // Fallback to browser TTS
+            console.warn('No audio content in response, falling back to browser TTS');
             throw new Error('No audio content');
         } catch (error) {
-            console.warn('Text-to-Speech failed, using browser TTS:', error.message);
+            console.warn('Text-to-Speech API failed, using browser TTS:', error.response?.data || error.message);
             return this.browserTextToSpeech(text);
         }
     }
