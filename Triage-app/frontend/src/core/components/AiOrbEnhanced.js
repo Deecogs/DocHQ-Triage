@@ -14,6 +14,11 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
     const [pulseIntensity, setPulseIntensity] = useState(0);
     const [colorTransition, setColorTransition] = useState(0);
 
+    // Debug orb state
+    useEffect(() => {
+        console.log('AiOrbEnhanced state:', { isListening, isAiSpeaking, analyser: !!analyser });
+    }, [isListening, isAiSpeaking, analyser]);
+
     const vertexShader = `
     attribute vec4 tangent;
 
@@ -188,13 +193,13 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
     }
     `;
 
-    // Smooth transitions for state changes with enhanced listening feedback
+    // Smooth transitions for state changes
     useEffect(() => {
-        const targetIntensity = isListening ? 1.2 : (isAiSpeaking ? 1.0 : 0.0); // Increased for listening
+        const targetIntensity = isListening ? 1.2 : (isAiSpeaking ? 1.0 : 0.0);
         const interval = setInterval(() => {
             setPulseIntensity(prev => {
                 const diff = targetIntensity - prev;
-                return Math.abs(diff) < 0.01 ? targetIntensity : prev + diff * 0.15; // Faster transition
+                return Math.abs(diff) < 0.01 ? targetIntensity : prev + diff * 0.15;
             });
         }, 16);
         
@@ -217,19 +222,13 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
     useFrame(({ clock }) => {
         const elapsedTime = clock.getElapsedTime();
         
-        // Store clock reference for use in JSX
-        window.orbClock = clock;
-        
         // Enhanced rotation and movement
         if (meshRef.current) {
-            // Faster rotation when listening
             const rotationSpeed = isListening ? 0.3 : (isAiSpeaking ? 0.2 : 0.1);
             meshRef.current.rotation.y = elapsedTime * rotationSpeed;
             
-            // More pronounced bobbing when listening
             if (isListening) {
                 meshRef.current.position.y = Math.sin(elapsedTime * 3) * 0.08;
-                // Add subtle rotation wobble for listening feedback
                 meshRef.current.rotation.x = Math.sin(elapsedTime * 4) * 0.05;
                 meshRef.current.rotation.z = Math.cos(elapsedTime * 3.5) * 0.03;
             } else if (isAiSpeaking) {
@@ -237,7 +236,6 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
                 meshRef.current.rotation.x = 0;
                 meshRef.current.rotation.z = 0;
             } else {
-                // Return to center when idle
                 meshRef.current.position.y *= 0.95;
                 meshRef.current.rotation.x *= 0.95;
                 meshRef.current.rotation.z *= 0.95;
@@ -246,37 +244,43 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
 
         let audioReactivity = 0;
         
+        // Only process audio when we have an analyser and are in listening/speaking mode
         if (analyser && (isListening || isAiSpeaking)) {
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-            
-            // Calculate different frequency bands
-            const bass = dataArray.slice(0, 50).reduce((a, b) => a + b, 0) / 50;
-            const mid = dataArray.slice(50, 200).reduce((a, b) => a + b, 0) / 150;
-            const treble = dataArray.slice(200, 500).reduce((a, b) => a + b, 0) / 300;
-            
-            // Weight different frequencies
-            const weightedAverage = (bass * 0.5 + mid * 0.3 + treble * 0.2) / 128;
-            audioReactivity = weightedAverage;
-            
-            if (materialRef.current) {
-                // Smooth audio reactivity
-                materialRef.current.uniforms.uAudioReactivity.value += 
-                    (audioReactivity - materialRef.current.uniforms.uAudioReactivity.value) * 0.3;
+            try {
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(dataArray);
                 
-                // Modify animation based on audio
-                materialRef.current.uniforms.uNoiseStrength.value = 0.90 + audioReactivity * 0.6;
-                materialRef.current.uniforms.uDisplacementStrength.value = 0.48 + audioReactivity * 0.3;
-                materialRef.current.uniforms.uFractAmount.value = 4 + audioReactivity * 3;
-                materialRef.current.uniforms.uSpeed.value = 1.10 + audioReactivity * 0.5;
-            }
+                // Calculate different frequency bands
+                const bass = dataArray.slice(0, 50).reduce((a, b) => a + b, 0) / 50;
+                const mid = dataArray.slice(50, 200).reduce((a, b) => a + b, 0) / 150;
+                const treble = dataArray.slice(200, 500).reduce((a, b) => a + b, 0) / 300;
+                
+                // Weight different frequencies
+                const weightedAverage = (bass * 0.5 + mid * 0.3 + treble * 0.2) / 128;
+                audioReactivity = weightedAverage;
+                
+                if (materialRef.current) {
+                    // Smooth audio reactivity
+                    materialRef.current.uniforms.uAudioReactivity.value += 
+                        (audioReactivity - materialRef.current.uniforms.uAudioReactivity.value) * 0.3;
+                    
+                    // Modify animation based on audio
+                    materialRef.current.uniforms.uNoiseStrength.value = 0.90 + audioReactivity * 0.6;
+                    materialRef.current.uniforms.uDisplacementStrength.value = 0.48 + audioReactivity * 0.3;
+                    materialRef.current.uniforms.uFractAmount.value = 4 + audioReactivity * 3;
+                    materialRef.current.uniforms.uSpeed.value = 1.10 + audioReactivity * 0.5;
+                }
 
-            if (depthMaterialRef.current) {
-                depthMaterialRef.current.uniforms.uAudioReactivity.value = materialRef.current.uniforms.uAudioReactivity.value;
-                depthMaterialRef.current.uniforms.uNoiseStrength.value = materialRef.current.uniforms.uNoiseStrength.value;
-                depthMaterialRef.current.uniforms.uDisplacementStrength.value = materialRef.current.uniforms.uDisplacementStrength.value;
-                depthMaterialRef.current.uniforms.uFractAmount.value = materialRef.current.uniforms.uFractAmount.value;
-                depthMaterialRef.current.uniforms.uSpeed.value = materialRef.current.uniforms.uSpeed.value;
+                if (depthMaterialRef.current) {
+                    depthMaterialRef.current.uniforms.uAudioReactivity.value = materialRef.current.uniforms.uAudioReactivity.value;
+                    depthMaterialRef.current.uniforms.uNoiseStrength.value = materialRef.current.uniforms.uNoiseStrength.value;
+                    depthMaterialRef.current.uniforms.uDisplacementStrength.value = materialRef.current.uniforms.uDisplacementStrength.value;
+                    depthMaterialRef.current.uniforms.uFractAmount.value = materialRef.current.uniforms.uFractAmount.value;
+                    depthMaterialRef.current.uniforms.uSpeed.value = materialRef.current.uniforms.uSpeed.value;
+                }
+            } catch (error) {
+                // Silently handle audio processing errors
+                console.warn('Audio processing error in orb:', error);
             }
         } else {
             // Gradually return to idle state
@@ -295,7 +299,7 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
             materialRef.current.uniforms.uPulseIntensity.value = pulseIntensity;
             materialRef.current.uniforms.uColorMix.value = colorTransition;
             materialRef.current.uniforms.uGlowIntensity.value = 
-                isAiSpeaking ? 1.5 : (isListening ? 1.8 : 0.3); // Higher glow for listening
+                isAiSpeaking ? 1.5 : (isListening ? 1.8 : 0.3);
         }
         if (depthMaterialRef.current) {
             depthMaterialRef.current.uniforms.uTime.value = elapsedTime;
@@ -312,8 +316,8 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
     const uniforms = {
         uTime: { value: 0 },
         uColorIdle: { value: new Color('#ffeffe') },
-        uColorListening: { value: new Color('#ff69b4') }, // Hot pink for listening - more vibrant
-        uColorSpeaking: { value: new Color('#00bfff') }, // Deeper sky blue for AI speaking
+        uColorListening: { value: new Color('#ff69b4') },
+        uColorSpeaking: { value: new Color('#00bfff') },
         uColorMix: { value: 0 },
         uGlowIntensity: { value: 0.3 },
         uGradientStrength: { value: 3 },
@@ -332,7 +336,7 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
                 geometry={geometry} 
                 frustumCulled={false} 
                 position={[0, isMobile ? -1.3 * 0 : 0, 0]}
-                scale={isListening ? 1.15 : (isAiSpeaking ? 1.1 : 1)} // Slightly larger when listening
+                scale={isListening ? 1.15 : (isAiSpeaking ? 1.1 : 1)}
             >
                 <CustomShaderMaterial 
                     ref={materialRef} 
@@ -378,15 +382,6 @@ const AiOrbGeometry = ({ shouldReduceQuality, isMobile, analyser, isListening, i
                     color={isAiSpeaking ? "#00bfff" : "#ff69b4"} 
                     intensity={isListening ? 3 : 2} 
                     position={[0, 0, 2]} 
-                />
-            )}
-            
-            {/* Extra pulsing light when listening for maximum visibility */}
-            {isListening && (
-                <pointLight 
-                    color="#ff1493" 
-                    intensity={2 + Math.sin((window.orbClock?.getElapsedTime() || 0) * 5) * 0.5} 
-                    position={[0, 0, -2]} 
                 />
             )}
         </>

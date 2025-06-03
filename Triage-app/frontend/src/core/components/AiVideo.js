@@ -24,7 +24,6 @@ export default function AiVideo({ step, next }) {
         try {
             console.log("Starting video recording...");
             
-            // Get camera stream
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 video: {
                     width: { ideal: 1280 },
@@ -33,12 +32,10 @@ export default function AiVideo({ step, next }) {
                 audio: false 
             });
             
-            // Set video source
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
             }
 
-            // Initialize MediaRecorder
             const mimeType = 'video/webm;codecs=vp8,opus';
             const options = { mimeType };
             
@@ -51,35 +48,28 @@ export default function AiVideo({ step, next }) {
             mediaRecorderRef.current = mediaRecorder;
             chunksRef.current = [];
 
-            // Handle data available
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     chunksRef.current.push(event.data);
                 }
             };
 
-            // Handle recording stop
             mediaRecorder.onstop = async () => {
                 console.log("Recording stopped, processing video...");
                 
-                // Create blob from chunks
                 const blob = new Blob(chunksRef.current, { type: 'video/webm' });
                 
-                // Convert to base64
                 try {
                     const base64Video = await blobToBase64(blob);
                     console.log("Video converted to base64, size:", base64Video.length);
                     
-                    // Stop camera
                     stream.getTracks().forEach(track => track.stop());
                     if (videoRef.current) {
                         videoRef.current.srcObject = null;
                     }
                     
-                    // Send to parent
                     if (next && !hasProcessedRef.current) {
                         hasProcessedRef.current = true;
-                        // Use microtask to avoid React warning
                         queueMicrotask(() => {
                             next(base64Video);
                         });
@@ -89,7 +79,6 @@ export default function AiVideo({ step, next }) {
                 }
             };
 
-            // Start recording
             mediaRecorder.start();
             setIsRecording(true);
             console.log("Recording started");
@@ -100,7 +89,6 @@ export default function AiVideo({ step, next }) {
         }
     }, [blobToBase64, next]);
 
-    // Stop recording
     const stopRecording = useCallback(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
             console.log("Stopping recording...");
@@ -109,7 +97,6 @@ export default function AiVideo({ step, next }) {
         }
     }, []);
 
-    // Initialize when step becomes 8
     useEffect(() => {
         if (parseInt(step) === 8 && !isRecording && !hasProcessedRef.current) {
             hasProcessedRef.current = false;
@@ -117,7 +104,6 @@ export default function AiVideo({ step, next }) {
             startRecording();
         }
         
-        // Cleanup when leaving step 8
         return () => {
             if (parseInt(step) !== 8) {
                 stopRecording();
@@ -130,7 +116,6 @@ export default function AiVideo({ step, next }) {
         };
     }, [step, isRecording, startRecording, stopRecording]);
 
-    // Timer countdown
     useEffect(() => {
         if (parseInt(step) === 8 && isRecording) {
             const interval = setInterval(() => {
@@ -147,14 +132,12 @@ export default function AiVideo({ step, next }) {
         }
     }, [step, isRecording]);
 
-    // Stop recording when timer reaches 0
     useEffect(() => {
         if (timer === 0 && isRecording) {
             stopRecording();
         }
     }, [timer, isRecording, stopRecording]);
 
-    // Don't render if not on step 8
     if (parseInt(step) !== 8) return null;
 
     return (
@@ -175,7 +158,6 @@ export default function AiVideo({ step, next }) {
                             className='object-cover absolute inset-0 w-full h-full' 
                         />
                         
-                        {/* Timer */}
                         <div className='bg-white absolute top-[20px] left-[20px] text-txtMain p-3 rounded-tl-[14px] rounded-tr-[2px] rounded-br-[14px] rounded-bl-[2px] text-lg font-semibold shadow-lg'>
                             {isRecording ? (
                                 <div className='flex items-center gap-2'>
@@ -187,7 +169,6 @@ export default function AiVideo({ step, next }) {
                             )}
                         </div>
                         
-                        {/* Instructions */}
                         <div className='bg-white/90 absolute bottom-[20px] left-1/2 transform -translate-x-1/2 px-6 py-2 rounded-full text-sm'>
                             Please point to where you feel pain
                         </div>

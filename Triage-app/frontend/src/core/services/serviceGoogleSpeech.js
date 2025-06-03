@@ -1,21 +1,23 @@
-// frontend/src/core/services/serviceGoogleSpeech.js
 import axios from 'axios';
 
 class ServiceGoogleSpeech {
     constructor() {
-        this.GOOGLE_STT_API = `${process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080'}/api/speech-to-text`;
-        this.GOOGLE_TTS_API = `${process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080'}/api/text-to-speech`;
+        // Use environment variable or fallback to localhost
+        const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+        this.GOOGLE_STT_API = `${backendUrl}/api/speech-to-text`;
+        this.GOOGLE_TTS_API = `${backendUrl}/api/text-to-speech`;
+        this.HEALTH_API = `${backendUrl}/api/speech/health`;
         this.isConfigured = false;
-        // Don't check health in constructor - it can block initialization
     }
 
     async checkHealth() {
         try {
-            const response = await axios.get(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080'}/api/speech/health`);
+            const response = await axios.get(this.HEALTH_API);
             this.isConfigured = response.data?.data?.api_working || false;
+            console.log('Speech API health check result:', this.isConfigured);
             return this.isConfigured;
         } catch (error) {
-            console.warn('Speech API health check failed, using fallback:', error.message);
+            console.warn('Speech API health check failed:', error.message);
             this.isConfigured = false;
             return false;
         }
@@ -31,21 +33,23 @@ class ServiceGoogleSpeech {
                 language_code: languageCode
             };
 
-            console.log('Sending speech-to-text request, audio size:', audioContent.length);
+            console.log('Sending STT request, audio size:', audioContent.length);
             const response = await axios.post(this.GOOGLE_STT_API, requestBody, {
-                timeout: 30000 // 30 second timeout
+                timeout: 30000,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             });
             
             if (response.data?.success && response.data?.data?.transcript) {
-                console.log('Speech-to-text successful:', response.data.data.transcript);
+                console.log('STT successful:', response.data.data.transcript);
                 return response.data.data.transcript;
             }
             
-            console.warn('Speech-to-text returned no transcript');
-            return null; // Return null instead of empty string to indicate failure
+            console.warn('STT returned no transcript');
+            return null;
         } catch (error) {
-            console.error('Speech-to-Text error:', error.response?.data || error.message);
-            // Return null to indicate failure, let the caller handle retry
+            console.error('STT error:', error.response?.data || error.message);
             return null;
         }
     }
@@ -59,62 +63,31 @@ class ServiceGoogleSpeech {
                 speaking_rate: options.speakingRate || 0.9
             };
 
-            console.log('Sending text-to-speech request for:', text.substring(0, 50) + '...');
+            console.log('Sending TTS request for:', text.substring(0, 50) + '...');
             const response = await axios.post(this.GOOGLE_TTS_API, requestBody, {
-                timeout: 30000 // 30 second timeout
+                timeout: 30000,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             });
             
             if (response.data?.success && response.data?.data?.audio_content) {
-                console.log('Text-to-speech successful');
+                console.log('TTS successful');
                 return this.base64ToBlob(response.data.data.audio_content, 'audio/wav');
             }
             
-            // Fallback to browser TTS
-            console.warn('No audio content in response, falling back to browser TTS');
-            throw new Error('No audio content');
+            throw new Error('No audio content in response');
         } catch (error) {
-            console.warn('Text-to-Speech API failed, using browser TTS:', error.response?.data || error.message);
-            return this.browserTextToSpeech(text);
+            console.warn('TTS API failed:', error.response?.data || error.message);
+            throw error; // Let caller handle fallback
         }
-    }
-
-    async browserTextToSpeech(text) {
-        // Return a promise that resolves with a dummy blob
-        return new Promise((resolve) => {
-            if ('speechSynthesis' in window) {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.rate = 0.9;
-                window.speechSynthesis.speak(utterance);
-            }
-            // Return dummy blob for consistency
-            resolve(new Blob([''], { type: 'audio/wav' }));
-        });
     }
 
     async playAudio(audioBlob) {
-        // Check if it's a dummy blob
         if (!audioBlob || audioBlob.size === 0) {
-            // Wait for browser TTS to finish
-            return new Promise((resolve) => {
-                if ('speechSynthesis' in window) {
-                    const checkSpeaking = setInterval(() => {
-                        if (!window.speechSynthesis.speaking) {
-                            clearInterval(checkSpeaking);
-                            resolve();
-                        }
-                    }, 100);
-                    // Timeout after 10 seconds
-                    setTimeout(() => {
-                        clearInterval(checkSpeaking);
-                        resolve();
-                    }, 10000);
-                } else {
-                    resolve();
-                }
-            });
+            return Promise.resolve();
         }
 
-        // Normal audio playback
         return new Promise((resolve, reject) => {
             try {
                 const audioUrl = URL.createObjectURL(audioBlob);
@@ -129,19 +102,16 @@ class ServiceGoogleSpeech {
                 
                 audio.onerror = () => {
                     URL.revokeObjectURL(audioUrl);
-                    resolve(); // Resolve instead of reject to prevent app crash
+                    resolve();
                 };
                 
-                audio.play().then(() => {
-                    // Playing successfully
-                }).catch(() => {
-                    // Can't play, just resolve
+                audio.play().catch(() => {
                     URL.revokeObjectURL(audioUrl);
                     resolve();
                 });
             } catch (error) {
                 console.warn('Audio playback error:', error);
-                resolve(); // Always resolve to prevent blocking
+                resolve();
             }
         });
     }
@@ -151,10 +121,10 @@ class ServiceGoogleSpeech {
             try {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result);
-                reader.onerror = () => resolve(''); // Return empty string on error
+                reader.onerror = () => resolve('');
                 reader.readAsDataURL(blob);
             } catch (error) {
-                resolve(''); // Return empty string on error
+                resolve('');
             }
         });
     }

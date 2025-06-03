@@ -45,7 +45,8 @@ func SpeechToTextHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create client with service account
-	client, err := speech.NewClient(ctx, option.WithCredentialsFile("./dochq-staging-72db3155a22d.json"))
+	// client, err := speech.NewClient(ctx, option.WithCredentialsFile("./dochq-staging-72db3155a22d.json"))
+	client, err := speech.NewClient(ctx)
 	if err != nil {
 		http.Error(w, "Failed to create client: "+err.Error(), http.StatusInternalServerError)
 		return

@@ -10,14 +10,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Frontend request structures
 type SpeechToTextRequest struct {
-	AudioContent string `json:"audio_content"`
+	AudioContent string `json:"audio_content" binding:"required"`
 	LanguageCode string `json:"language_code"`
 }
 
 type TextToSpeechRequest struct {
-	Text         string  `json:"text"`
+	Text         string  `json:"text" binding:"required"`
 	VoiceName    string  `json:"voice_name"`
 	LanguageCode string  `json:"language_code"`
 	SpeakingRate float64 `json:"speaking_rate"`
@@ -32,8 +31,12 @@ func SpeechToText(c *gin.Context) {
 		return
 	}
 
-	// Log request details
-	log.Printf("Speech-to-Text request received, audio size: %d", len(request.AudioContent))
+	// Set default language code if not provided
+	if request.LanguageCode == "" {
+		request.LanguageCode = "en-US"
+	}
+
+	log.Printf("STT request received, audio size: %d, language: %s", len(request.AudioContent), request.LanguageCode)
 
 	// Convert to Google API format
 	googleRequest := map[string]interface{}{
@@ -52,7 +55,7 @@ func SpeechToText(c *gin.Context) {
 
 	result, err := clients.GetGoogleSpeechClient().SpeechToText(googleRequest)
 	if err != nil {
-		log.Printf("Speech-to-Text error: %v", err)
+		log.Printf("STT error: %v", err)
 		helpers.SendResponse(c.Writer, false, http.StatusInternalServerError, nil, err)
 		return
 	}
@@ -71,9 +74,8 @@ func SpeechToText(c *gin.Context) {
 		}
 	}
 
-	log.Printf("Speech-to-Text result: %s", transcript)
+	log.Printf("STT result: %s", transcript)
 
-	// Return in expected format
 	helpers.SendResponse(c.Writer, true, http.StatusOK, map[string]interface{}{
 		"transcript": transcript,
 	}, nil)
@@ -88,7 +90,18 @@ func TextToSpeech(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Text-to-Speech request received for text: %s", request.Text)
+	// Set defaults if not provided
+	if request.VoiceName == "" {
+		request.VoiceName = "en-US-Neural2-F"
+	}
+	if request.LanguageCode == "" {
+		request.LanguageCode = "en-US"
+	}
+	if request.SpeakingRate == 0 {
+		request.SpeakingRate = 0.9
+	}
+
+	log.Printf("TTS request received for text: %s", request.Text[:min(50, len(request.Text))])
 
 	// Convert to Google API format
 	googleRequest := map[string]interface{}{
@@ -107,7 +120,7 @@ func TextToSpeech(c *gin.Context) {
 
 	result, err := clients.GetGoogleSpeechClient().TextToSpeech(googleRequest)
 	if err != nil {
-		log.Printf("Text-to-Speech error: %v", err)
+		log.Printf("TTS error: %v", err)
 		helpers.SendResponse(c.Writer, false, http.StatusInternalServerError, nil, err)
 		return
 	}
@@ -118,24 +131,36 @@ func TextToSpeech(c *gin.Context) {
 		audioContent = ac
 	}
 
-	// Return in expected format
+	log.Printf("TTS successful, audio size: %d", len(audioContent))
+
 	helpers.SendResponse(c.Writer, true, http.StatusOK, map[string]interface{}{
 		"audio_content": audioContent,
 	}, nil)
 }
 
-// SpeechHealthCheck checks if Google Speech APIs are properly configured
 func SpeechHealthCheck(c *gin.Context) {
-	client := clients.GetGoogleSpeechClient()
-
 	// Check if API key is set
 	apiKeySet := false
 	if os.Getenv("GOOGLE_CLOUD_API_KEY") != "" {
 		apiKeySet = true
 	}
 
+	// Check if service account is set
+	serviceAccountSet := false
+	if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" {
+		serviceAccountSet = true
+	}
+
 	helpers.SendResponse(c.Writer, true, http.StatusOK, map[string]interface{}{
-		"api_key_configured": apiKeySet,
-		"api_working":        apiKeySet, // Simplified check
+		"api_key_configured":         apiKeySet,
+		"service_account_configured": serviceAccountSet,
+		"api_working":                apiKeySet || serviceAccountSet,
 	}, nil)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

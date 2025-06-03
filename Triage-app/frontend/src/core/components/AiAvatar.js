@@ -1,5 +1,4 @@
 import React from 'react';
-
 import { AnimatePresence, motion } from "motion/react";
 import AiOrb from './AiOrb';
 import AiOrbEnhanced from './AiOrbEnhanced';
@@ -7,6 +6,14 @@ import AiOrbEnhanced from './AiOrbEnhanced';
 export default function AiAvatar(props) {
     // Use enhanced orb if voice features are being used
     const useEnhancedOrb = props.isListening !== undefined || props.isAiSpeaking !== undefined;
+    
+    // Debug info
+    console.log('AiAvatar render:', {
+        step: props.step,
+        isListening: props.isListening,
+        isAiSpeaking: props.isAiSpeaking,
+        useEnhancedOrb
+    });
     
     return (
         <div className={`flex items-center justify-center transition-all duration-500 absolute ${props.isOpen ? 'w-full h-screen' : 'w-[120px] h-[120px] right-[8%]'} p-[20px]`}>
@@ -39,5 +46,5 @@ export default function AiAvatar(props) {
                 }
             </div>
         </div>
-    )
+    );
 }
